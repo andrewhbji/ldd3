@@ -6,7 +6,7 @@
 #include <linux/moduleparam.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
-
+#define ARRAYSIZE 10
 /*                                                        
  * These lines, although not shown in the book,           
  * are needed to make hello.c run properly even when      
@@ -20,14 +20,21 @@ MODULE_LICENSE("Dual BSD/GPL");
  */
 static char *whom = "world";
 static int howmany = 1;
+static int array[ARRAYSIZE];
+int narr;
+
 module_param(howmany, int, S_IRUGO);
 module_param(whom, charp, S_IRUGO);
+module_param_array(array,int,&narr,S_IRUGO);
 
 static int hello_init(void)
 {
 	int i;
 	for (i = 0; i < howmany; i++)
 		printk(KERN_ALERT "(%d) Hello, %s\n", i, whom);
+	int j;
+	for (j = 0; j < narr; j++)
+		printk(KERN_ALERT "array[%d] = %d\n", j, array[j]);
 	return 0;
 }
 
