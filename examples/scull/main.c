@@ -14,7 +14,7 @@
  *
  */
 
-#include <linux/config.h>
+/*#include <linux/config.h>*/
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -29,7 +29,7 @@
 #include <linux/seq_file.h>
 #include <linux/cdev.h>
 
-#include <asm/system.h>		/* cli(), *_flags */
+/*#include <asm/system.h>*/		/* cli(), *_flags */
 #include <asm/uaccess.h>	/* copy_*_user */
 
 #include "scull.h"		/* local definitions */
@@ -63,19 +63,26 @@ struct scull_dev *scull_devices;	/* allocated in scull_init_module */
 int scull_trim(struct scull_dev *dev)
 {
 	struct scull_qset *next, *dptr;
-	int qset = dev->qset;   /* "dev" is not-null */
+	int qset = dev->qset;   /* "dev" is not-null 1000*/
 	int i;
-
+	/* dev->data指向第一个量子集scull_qset。所以这个for循环每次循环处理一个scull_qset */
 	for (dptr = dev->data; dptr; dptr = next) { /* all the list items */
 		if (dptr->data) {
+			/* 这个for循环循环1000次 */
 			for (i = 0; i < qset; i++)
+				/*释放掉量子*/
 				kfree(dptr->data[i]);
+			/*所有量子释放完毕,释放量子数组*/
 			kfree(dptr->data);
+			/* 滞空指向量子数组的指针 */
 			dptr->data = NULL;
 		}
+		/* 准备处理下一个量子集*/
 		next = dptr->next;
+		/* 释放掉当前量子集 */
 		kfree(dptr);
 	}
+	/* 恢复初始状态 */
 	dev->size = 0;
 	dev->quantum = scull_quantum;
 	dev->qset = scull_qset;
@@ -238,12 +245,18 @@ static void scull_remove_proc(void)
 int scull_open(struct inode *inode, struct file *filp)
 {
 	struct scull_dev *dev; /* device information */
-
+	/*
+	 * 调用container_of宏，通过cdev成员得到包含该cdev的scull_dev结构,然后保存在flip文件中
+	 */
 	dev = container_of(inode->i_cdev, struct scull_dev, cdev);
 	filp->private_data = dev; /* for other methods */
 
 	/* now trim to 0 the length of the device if open was write-only */
+	/* 如果scull设备文件是以只写的方式打开，则要调用scull_trim将scull设备清空 */
 	if ( (filp->f_flags & O_ACCMODE) == O_WRONLY) {
+		/*
+		 * 进行加锁解锁操作，进行互斥
+		 */
 		if (down_interruptible(&dev->sem))
 			return -ERESTARTSYS;
 		scull_trim(dev); /* ignore errors */
@@ -263,7 +276,8 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 {
 	struct scull_qset *qs = dev->data;
 
-        /* Allocate first qset explicitly if need be */
+    /* Allocate first qset explicitly if need be */
+	/* 如果量子集首结点不存在,则创建量子集首结点 */
 	if (! qs) {
 		qs = dev->data = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
 		if (qs == NULL)
@@ -272,6 +286,7 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 	}
 
 	/* Then follow the list */
+	/* 根据n找到指定的量子集,如果量子集不在则创建量子集 */
 	while (n--) {
 		if (!qs->next) {
 			qs->next = kmalloc(sizeof(struct scull_qset), GFP_KERNEL);
@@ -292,13 +307,16 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
 ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
+	/* dev之前在open函数中已经保存在flip->private_data中,这里直接取 */
 	struct scull_dev *dev = filp->private_data; 
 	struct scull_qset *dptr;	/* the first listitem */
+	/* 计算量子集的byte大小,默认4000000*/
 	int quantum = dev->quantum, qset = dev->qset;
 	int itemsize = quantum * qset; /* how many bytes in the listitem */
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = 0;
 
+	/* 获得互斥锁 */
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
 	if (*f_pos >= dev->size)
@@ -307,17 +325,21 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 		count = dev->size - *f_pos;
 
 	/* find listitem, qset index, and offset in the quantum */
+	/* item代表要读的数据起始点在哪个量子集中,s_pos代表要读的数据起始点在哪个量子中。q_pos代表要读的数据的起始点在量子的具体哪个位置 */
 	item = (long)*f_pos / itemsize;
 	rest = (long)*f_pos % itemsize;
 	s_pos = rest / quantum; q_pos = rest % quantum;
 
 	/* follow the list up to the right position (defined elsewhere) */
+	/* 根据item找到量子集,如果存在则返回地址,如果不存在,则创建指定的量子集然后返回地址*/
 	dptr = scull_follow(dev, item);
 
+	/* 如果指定的scull_qset不存在，或者量子指针数组不存在，或者量子不存在，都退出 */
 	if (dptr == NULL || !dptr->data || ! dptr->data[s_pos])
 		goto out; /* don't fill holes */
 
 	/* read only up to the end of this quantum */
+	/* 设置scull_read一次最多只能读一个量子, 如果不这样做就会越界*/
 	if (count > quantum - q_pos)
 		count = quantum - q_pos;
 
@@ -325,7 +347,9 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 		retval = -EFAULT;
 		goto out;
 	}
+	/* 读取完成后，新的文件指针位置向前移动count个字节 */
 	*f_pos += count;
+	/* 返回读取到的字节数,即count*/
 	retval = count;
 
   out:
@@ -343,41 +367,52 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 	int item, s_pos, q_pos, rest;
 	ssize_t retval = -ENOMEM; /* value used in "goto out" statements */
 
+	/* 获得互斥锁 */
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
 
 	/* find listitem, qset index and offset in the quantum */
+	/* item代表要写入的位置在哪一个量子集中,s_pos代表要写入的位置在哪个量子中,q_pos代表要写入的的位置在量子中的位置*/
 	item = (long)*f_pos / itemsize;
 	rest = (long)*f_pos % itemsize;
 	s_pos = rest / quantum; q_pos = rest % quantum;
 
 	/* follow the list up to the right position */
+	/* 取出量子 */
 	dptr = scull_follow(dev, item);
 	if (dptr == NULL)
 		goto out;
+	/* 如果量子集中的数组不存在,分配内存*/
 	if (!dptr->data) {
 		dptr->data = kmalloc(qset * sizeof(char *), GFP_KERNEL);
 		if (!dptr->data)
 			goto out;
 		memset(dptr->data, 0, qset * sizeof(char *));
 	}
+	/* 如果指定的量子不存在,创建量子*/
 	if (!dptr->data[s_pos]) {
 		dptr->data[s_pos] = kmalloc(quantum, GFP_KERNEL);
 		if (!dptr->data[s_pos])
 			goto out;
 	}
 	/* write only up to the end of this quantum */
+	/* 限制一次write最多写满一个量子,否则会越界 */
 	if (count > quantum - q_pos)
 		count = quantum - q_pos;
 
+	/* 把数据写入量子 */
 	if (copy_from_user(dptr->data[s_pos]+q_pos, buf, count)) {
 		retval = -EFAULT;
 		goto out;
 	}
+
+	/* 文件指针后移count个字节 */
 	*f_pos += count;
+	/* 返回写入的count */
 	retval = count;
 
-        /* update the size */
+    /* update the size */
+    /* 更新文件大小 */
 	if (dev->size < *f_pos)
 		dev->size = *f_pos;
 
@@ -390,8 +425,8 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
  * The ioctl() implementation
  */
 
-int scull_ioctl(struct inode *inode, struct file *filp,
-                 unsigned int cmd, unsigned long arg)
+/*int scull_ioctl(struct inode *inode, struct file *filp,unsigned int cmd, unsigned long arg)*/
+int scull_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 
 	int err = 0, tmp;
@@ -547,13 +582,17 @@ loff_t scull_llseek(struct file *filp, loff_t off, int whence)
 }
 
 
-
+/*
+ * ssize_t scull_read --> typedef int ssize_t;
+ * 通过 scull_fops, 内核就知道了, 如果用户空间程序调用 open操作打开scull相应设备, 内核就会执行scull驱动程序的scull_open函数进行响应. 其它函数依次类推.
+ */
 struct file_operations scull_fops = {
 	.owner =    THIS_MODULE,
 	.llseek =   scull_llseek,
 	.read =     scull_read,
 	.write =    scull_write,
-	.ioctl =    scull_ioctl,
+	/*.ioctl =    scull_ioctl,*/
+    .unlocked_ioctl = scull_ioctl,
 	.open =     scull_open,
 	.release =  scull_release,
 };
@@ -597,14 +636,24 @@ void scull_cleanup_module(void)
 
 /*
  * Set up the char_dev structure for this device.
+ * 完成对scull设备的cdev成员变量(struct cdev类型)的初始化和注册
  */
 static void scull_setup_cdev(struct scull_dev *dev, int index)
 {
+	/*
+	 * 获得设备编号,主设备号一致,从设备号分别为0,1,2,3
+	 */
 	int err, devno = MKDEV(scull_major, scull_minor + index);
     
+    /*
+     * cdev_init 初始化cdev结构体
+     */
 	cdev_init(&dev->cdev, &scull_fops);
 	dev->cdev.owner = THIS_MODULE;
 	dev->cdev.ops = &scull_fops;
+	/*
+	 * cdev_add 函数将 cdev结构体注册到内核,注册成功后,相应的scull设备就激活了.
+	 */
 	err = cdev_add (&dev->cdev, devno, 1);
 	/* Fail gracefully if need be */
 	if (err)
@@ -620,40 +669,67 @@ int scull_init_module(void)
 /*
  * Get a range of minor numbers to work with, asking for a dynamic
  * major unless directed otherwise at load time.
+ * 根据scull_major的值是否为0,分别采用静态分配或动态分配
+ * scull_major为主设备编号,在scull中初始定义为 #define SCULL_MAJOR 0,如果用户通过命令行参数给major赋 >0 的值,则采取静态分配
+ * scull_minor为从设备编号
  */
 	if (scull_major) {
 		dev = MKDEV(scull_major, scull_minor);
+		/*
+		 * 静态分配设备编号
+		*/
 		result = register_chrdev_region(dev, scull_nr_devs, "scull");
 	} else {
+		/*
+		 * 动态分配设备编号
+		 */
 		result = alloc_chrdev_region(&dev, scull_minor, scull_nr_devs,
 				"scull");
 		scull_major = MAJOR(dev);
 	}
+
+	/*分配设备编号出错*/
 	if (result < 0) {
 		printk(KERN_WARNING "scull: can't get major %d\n", scull_major);
 		return result;
 	}
 
-        /* 
+    /* 
 	 * allocate the devices -- we can't have them static, as the number
 	 * can be specified at load time
+	 */
+	/*
+	 * 为每一个设备分配内存空间
+	 * scull_nr_devs 默认为4 ,即默认创建4个scull设备, 在scull.h 定义 define SCULL_NR_DEVS 4 
 	 */
 	scull_devices = kmalloc(scull_nr_devs * sizeof(struct scull_dev), GFP_KERNEL);
 	if (!scull_devices) {
 		result = -ENOMEM;
 		goto fail;  /* Make this more graceful */
 	}
+	/*
+	 * 将scull_devices分配的内存清零
+	 */
 	memset(scull_devices, 0, scull_nr_devs * sizeof(struct scull_dev));
 
-        /* Initialize each device. */
+    /* Initialize each device. */
+    /*
+     * 初始化 scull_nr_dev个 scull_dev结构体, 即scull_nr_dev个scull_dev设备
+     * scull_devices[i].qset代表当前scull设备中每一个qset的data域指向的数组有SCULL_QSET(默认1000)个指针
+     * scull_devices[i].quantum代表当前scull设备中每一个qset中上面的数组指向的量子有SCULL_QUANTUM(默认4000)个字节
+     */
 	for (i = 0; i < scull_nr_devs; i++) {
 		scull_devices[i].quantum = scull_quantum;
 		scull_devices[i].qset = scull_qset;
-		init_MUTEX(&scull_devices[i].sem);
+		/* init_MUTEX(&scull_devices[i].sem);*/
+        sema_init(&scull_devices[i].sem,1);
+		/*
+		 * 调用了scull_setup_cdev函数对相应scull设备进行设置
+		 */
 		scull_setup_cdev(&scull_devices[i], i);
 	}
 
-        /* At this point call the init function for any friend device */
+    /* At this point call the init function for any friend device */
 	dev = MKDEV(scull_major, scull_minor + scull_nr_devs);
 	dev += scull_p_init(dev);
 	dev += scull_access_init(dev);
