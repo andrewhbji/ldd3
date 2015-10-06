@@ -323,7 +323,7 @@ ssize_t scull_read(struct file *filp, char __user *buf, size_t count,
 		goto out;
 	if (*f_pos + count > dev->size)
 		count = dev->size - *f_pos;
-
+    printk(KERN_ALERT "Debug by andrea:scull_read()/n");
 	/* find listitem, qset index, and offset in the quantum */
 	/* item代表要读的数据起始点在哪个量子集中,s_pos代表要读的数据起始点在哪个量子中。q_pos代表要读的数据的起始点在量子的具体哪个位置 */
 	item = (long)*f_pos / itemsize;
@@ -370,7 +370,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
 	/* 获得互斥锁 */
 	if (down_interruptible(&dev->sem))
 		return -ERESTARTSYS;
-
+    printk(KERN_ALERT "Debug by andrea:scull_write()/n");
 	/* find listitem, qset index and offset in the quantum */
 	/* item代表要写入的位置在哪一个量子集中,s_pos代表要写入的位置在哪个量子中,q_pos代表要写入的的位置在量子中的位置*/
 	item = (long)*f_pos / itemsize;
@@ -673,6 +673,7 @@ int scull_init_module(void)
  * scull_major为主设备编号,在scull中初始定义为 #define SCULL_MAJOR 0,如果用户通过命令行参数给major赋 >0 的值,则采取静态分配
  * scull_minor为从设备编号
  */
+    printk(KERN_ALERT "Debug by andrea:scull_init_module()/n");
 	if (scull_major) {
 		dev = MKDEV(scull_major, scull_minor);
 		/*
