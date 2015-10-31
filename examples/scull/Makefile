@@ -22,6 +22,7 @@ obj-m	:= scull.o
 else
 
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+# KERNELDIR ?= /usr/src/linux-3.4.109
 PWD       := $(shell pwd)
 
 modules:
